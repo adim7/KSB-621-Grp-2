@@ -1,4 +1,8 @@
 
+#Getting the data files loaded
+dudes_data_paths <- fs::dir_info("KSB_621/Data/")
+
+
 #Cleaning and preprocessing Events data
 Events_all[Events_all == "-"] <- NA # converting all non-standard characters ("-") to NAs
 
