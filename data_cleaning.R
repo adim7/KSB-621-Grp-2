@@ -141,6 +141,13 @@ chargetypesandclassifications <- clean_chargetypesandclassifications_df
 
 ################################################################################################
 
+#load room capacity data
+
+roomcapacity <- RoomCapacityData
+
+################################################################################################
+
+
 # Joining all the preprocessed datasets
 
 All_join <- invoicelineitems_all %>% group_by(AcctInvID) %>% mutate(ID_2 = row_number()) %>%
@@ -155,7 +162,7 @@ All_join <- invoicelineitems_all %>% group_by(AcctInvID) %>% mutate(ID_2 = row_n
             by = c("FSScheduleID", "ID_5")) %>% group_by(AcctChargeID) %>%
   left_join(chargetypesandclassifications  %>% mutate(ID_6 = row_number()),
             by = c("AcctChargeID")) %>%
-  left_join(RoomCapacity %>% group_by(RoomID) %>% mutate(ID_6 = row_number()),
+  left_join(roomcapacity %>% group_by(RoomID) %>% mutate(ID_6 = row_number()),
             by = c("RoomID", "ID_6")) %>%
   ungroup() %>%
   separate(AcctEventID, into = c("AcctNum", "EventID")) %>%
@@ -166,4 +173,5 @@ All_join <- invoicelineitems_all %>% group_by(AcctInvID) %>% mutate(ID_2 = row_n
          PaymentAmount = ifelse(is.na(PaymentAmount), 0.00, PaymentAmount),
          EstimatedHours = ifelse(is.na(EstimatedHours), 0.00, EstimatedHours),
          EstimatedCosts = ifelse(is.na(EstimatedCosts), 0, EstimatedCosts),
-         EventHours = ifelse(is.na(EventHours), 0, EventHours)); All_join %>% head(5)
+         EventHours = ifelse(is.na(EventHours), 0, EventHours)); All_join %>% head(5) %>%
+  write_csv("~/Documents/R Projects 2020/Dude Solutions/Dude Solutions Project/KSB_621/Data/All_join.csv")
