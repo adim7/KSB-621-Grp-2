@@ -162,8 +162,8 @@ All_join <- invoicelineitems_all %>% group_by(AcctInvID) %>% mutate(ID_2 = row_n
             by = c("FSScheduleID", "ID_5")) %>% group_by(AcctChargeID) %>%
   left_join(chargetypesandclassifications  %>% mutate(ID_6 = row_number()),
             by = c("AcctChargeID")) %>%
-  left_join(roomcapacity %>% group_by(RoomID) %>% mutate(ID_6 = row_number()),
-            by = c("RoomID", "ID_6")) %>%
+  left_join(roomcapacity,
+            by = c("RoomID")) %>%
   ungroup() %>%
   separate(AcctEventID, into = c("AcctNum", "EventID")) %>%
   select(-ID_2, -AcctNum.x, -ID_3, -AcctNum.y, -ID_4, -ID_5, -ID_6, -date) %>%
