@@ -1,4 +1,5 @@
-
+library(tidyverse)
+library(lubridate)
 #Getting the data files loaded into R
 dudes_data_paths <- fs::dir_info("../KSB_621/Data/")
 
@@ -9,14 +10,22 @@ dudes_data <- paths_chr %>%
   map(read_csv) %>%
   set_names(paths_chr)
 
+
 #Assign appropriate names to tibbles
-dudes_data[1] -> ChargeTypesandClassifications
-dudes_data[2] -> EventWorkOrders
-dudes_data[3] -> Events_all
-dudes_data[4] -> InvoiceHeader
-dudes_data[5] -> InvoiceLineItems_all
-dudes_data[6] -> InvoicePayments
-dudes_data[7] -> RoomCapacityData
+ChargeTypesandClassifications <- dudes_data[1] %>%
+  map_df(~ .)
+EventWorkOrders <- dudes_data[2] %>%
+  map_df(~ .)
+Events_all <- dudes_data[3] %>%
+  map_df(~ .)
+InvoiceHeader <- dudes_data[4] %>%
+  map_df(~ .)
+InvoiceLineItems_all <- dudes_data[5] %>%
+  map_df(~ .)
+InvoicePayments <- dudes_data[6] %>%
+  map_df(~ .)
+RoomCapacityData <- dudes_data[7] %>%
+  map_df(~ .)
 
 #Cleaning and preprocessing Events data
 Events_all[Events_all == "-"] <- NA # converting all non-standard characters ("-") to NAs
@@ -49,10 +58,18 @@ clean_workorders_df <- EventWorkOrders %>%
   mutate(AcctNum = as.character(AcctNum),
          FSScheduleID = as.character(FSScheduleID),
          EventWOID = as.character(EventWOID),
+         EventWOHours = ifelse(EventWOHours == "-", NA, EventWOHours),
          EventWOHours = as.numeric(EventWOHours),
+         DateCompleted = ymd(DateCompleted),
+         WOStatus = ifelse(WOStatus == "-", NA, WOStatus),
          WOStatus = factor(WOStatus),
+         WOCraft = ifelse(WOCraft == "-", NA, WOCraft),
          WOCraft = factor(WOCraft),
-         Priority = factor(Priority))
+         Priority = factor(Priority),
+         DateEstStart = ymd(DateEstStart),
+         DateEstComp = ymd(DateEstComp),
+         EstimatedHours = as.numeric(EstimatedHours),
+         EstimatedCosts = as.numeric(EstimatedCosts))
 
 # Drop variables with over 60% missing values
 eventworkorders <- clean_workorders_df %>%
@@ -138,6 +155,8 @@ All_join <- invoicelineitems_all %>% group_by(AcctInvID) %>% mutate(ID_2 = row_n
             by = c("FSScheduleID", "ID_5")) %>% group_by(AcctChargeID) %>%
   left_join(chargetypesandclassifications  %>% mutate(ID_6 = row_number()),
             by = c("AcctChargeID")) %>%
+  left_join(RoomCapacity %>% group_by(RoomID) %>% mutate(ID_6 = row_number()),
+            by = c("RoomID", "ID_6")) %>%
   ungroup() %>%
   separate(AcctEventID, into = c("AcctNum", "EventID")) %>%
   select(-ID_2, -AcctNum.x, -ID_3, -AcctNum.y, -ID_4, -ID_5, -ID_6, -date) %>%
