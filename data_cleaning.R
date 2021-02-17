@@ -1,9 +1,22 @@
 
-#Getting the data files loaded
+#Getting the data files loaded into R
 dudes_data_paths <- fs::dir_info("../KSB_621/Data/")
 
 paths_chr <- dudes_data_paths %>%
   pull(path)
+
+dudes_data <- paths_chr %>%
+  map(read_csv) %>%
+  set_names(paths_chr)
+
+#Assign appropriate names to tibbles
+dudes_data[1] -> ChargeTypesandClassifications
+dudes_data[2] -> EventWorkOrders
+dudes_data[3] -> Events_all
+dudes_data[4] -> InvoiceHeader
+dudes_data[5] -> InvoiceLineItems_all
+dudes_data[6] -> InvoicePayments
+dudes_data[7] -> RoomCapacityData
 
 #Cleaning and preprocessing Events data
 Events_all[Events_all == "-"] <- NA # converting all non-standard characters ("-") to NAs
