@@ -1,0 +1,518 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+library(tidyverse)
+library(themis)
+library(tidymodels)
+library(moderndive)
+library(skimr)
+library(mice)
+library(lubridate)
+library(grid)
+library(gridExtra)
+```
+```{r}
+# Load original data
+All_join <- read_csv("../KSB_621/Data/All_join.csv")
+
+# select predetermined variables
+model_df_v1 <- All_join %>%
+  select(AcctNum, EventID, LineItemPriceEach, InvoiceAmount, PaymentAmount,EventDesc,
+         EventTitle, EventStartDate, EventStartMonth, EventStartDayofWeek, EventTime,
+         EventHours, StopHour, HoursWeekend, RoomDescription, AreaDesc, EventWOCosts, EventWOHours, RoomCapacity, ChargeClass)
+
+# creating Event and Room categories
+model_df_v2 <- model_df_v1 %>%
+  filter(!grepl("Labor|Personnel Fee|Personal|Custodial Only|Custodian|Technichian|Manager|Credit|Officer|Security
+              |OMIT|Meals|Beverage|Food|Lock|Key|Set up|Clean|Catering|Supervisor|Lifeguard|Application|Refund|Waived
+              |Admin|Administration|Support|Maintenance", # filter data to remove non-space related data
+                                 ChargeClass, ignore.case = TRUE)) %>%
+  mutate(EventTitle = str_trim(str_replace_all(EventTitle, "-", " ")), # remove unwanted characters in some variables
+       Event_Shift = ifelse(StopHour <= 12, "Early",
+                       ifelse(StopHour > 12 & StopHour <= 17, "Midday",
+                       ifelse(StopHour > 17, "Late", StopHour))), # create new feature Event Shift to identify start time frame of day
+       Event_Category = ifelse(is.na(EventTitle), EventTitle,
+                               case_when(
+                                 str_detect(EventTitle, regex(`Religious/Congregation`, ignore_case = T)) ~ "Religious/Congregation",
+                                 str_detect(EventDesc, regex(`Religious/Congregation`, ignore_case = T)) ~ "Religious/Congregation",
+                                 str_detect(EventTitle, regex(`Vocational/Mentoring`, ignore_case = T)) ~ "Vocational/Mentoring",
+                                 str_detect(EventDesc, regex(`Vocational/Mentoring`, ignore_case = T)) ~ "Vocational/Mentoring",
+                                 str_detect(EventTitle, regex(`Social/Cultural Events`, ignore_case = T)) ~ "Social/Cultural Events",
+                                 str_detect(EventDesc, regex(`Social/Cultural Events`, ignore_case = T)) ~ "Social/Cultural Events",
+                                 str_detect(EventTitle, regex(`Academic/Professional`, ignore_case = T)) ~ "Academic/Professional",
+                                 str_detect(EventDesc, regex(`Academic/Professional`, ignore_case = T)) ~ "Academic/Professional",
+                                 str_detect(EventTitle, regex(`Sports/Fitness`, ignore_case = T)) ~ "Sports/Fitness",
+                                 str_detect(EventDesc, regex(`Sports/Fitness`, ignore_case = T)) ~ "Sports/Fitness",
+                                 str_detect(EventTitle, regex(`Performing/Arts`, ignore_case = T)) ~ "Performing/Arts",
+                                 str_detect(EventDesc, regex(`Performing/Arts`, ignore_case = T)) ~ "Performing/Arts",
+                                 TRUE ~ "Other")), # Create Event Category variable from event description and event title variables - - see key word list scripts
+       Room_Category = ifelse(is.na(RoomDescription), RoomDescription,
+                              case_when(
+                                 str_detect(RoomDescription, regex(`Dinning/Cafeteria`, ignore_case = T)) ~ "Dinning/Cafeteria",
+                                 str_detect(AreaDesc, regex(`Dinning/Cafeteria`, ignore_case = T)) ~ "Dinning/Cafeteria",
+                                 str_detect(RoomDescription, regex(`Gymnasium/Gyms`, ignore_case = T)) ~ "Gymnasium/Gyms",
+                                 str_detect(AreaDesc, regex(`Gymnasium/Gyms`, ignore_case = T)) ~ "Gymnasium/Gyms",
+                                 str_detect(RoomDescription, regex(`Auditorium`, ignore_case = T)) ~ "Auditorium",
+                                 str_detect(AreaDesc, regex(`Auditorium`, ignore_case = T)) ~ "Auditorium",
+                                 str_detect(RoomDescription, regex(`Multipurpose Rooms`, ignore_case = T)) ~ "Multipurpose Rooms",
+                                 str_detect(AreaDesc, regex(`Multipurpose Rooms`, ignore_case = T)) ~ "Multipurpose Rooms",
+                                 str_detect(RoomDescription, regex(`Conference Rooms`, ignore_case = T)) ~ "Conference Rooms",
+                                 str_detect(AreaDesc, regex(`Conference Rooms`, ignore_case = T)) ~ "Conference Rooms",
+                                 str_detect(RoomDescription, regex(`Class/Lecture Rooms`, ignore_case = T)) ~ "Class/Lecture Rooms",
+                                 str_detect(AreaDesc, regex(`Class/Lecture Rooms`, ignore_case = T)) ~ "Class/Lecture Rooms",
+                                 str_detect(RoomDescription, regex(`General Meeting Rooms`, ignore_case = T)) ~ "General Meeting Rooms",
+                                 str_detect(AreaDesc, regex(`General Meeting Rooms`, ignore_case = T)) ~ "General Meeting Rooms",
+                                 str_detect(RoomDescription, regex(`Storage/Other Rooms`, ignore_case = T)) ~ "Storage/Other Rooms",
+                                 str_detect(AreaDesc, regex(`Storage/Other Rooms`, ignore_case = T)) ~ "Storage/Other Rooms",
+                                 str_detect(RoomDescription, regex(`Social/Cultural Events`, ignore_case = T)) ~ "Social/Cultural Events",
+                                 str_detect(AreaDesc, regex(`Social/Cultural Events`, ignore_case = T)) ~ "Social/Cultural Events",
+                                 str_detect(RoomDescription, regex(`Media & Computer Labs`, ignore_case = T)) ~ "Media & Computer Labs",
+                                 str_detect(AreaDesc, regex(`Media & Computer Labs`, ignore_case = T)) ~ "Media & Computer Labs",
+                                 str_detect(RoomDescription, regex(`Library`, ignore_case = T)) ~ "Library",
+                                 str_detect(AreaDesc, regex(`Library`, ignore_case = T)) ~ "Library",
+                                 str_detect(RoomDescription, regex(`Performing Arts`, ignore_case = T)) ~ "Performing Arts",
+                                 str_detect(AreaDesc, regex(`Performing Arts`, ignore_case = T)) ~ "Performing Arts",
+                                 str_detect(RoomDescription, regex(`Open Areas`, ignore_case = T)) ~ "Open Areas",
+                                 str_detect(AreaDesc, regex(`Open Areas`, ignore_case = T)) ~ "Open Areas",
+                                 str_detect(RoomDescription, regex(`Portables/Restrooms`, ignore_case = T)) ~ "Portables/Restrooms",
+                                 str_detect(AreaDesc, regex(`Portables/Restrooms`, ignore_case = T)) ~ "Portables/Restrooms",
+                                 str_detect(RoomDescription, regex(`Grounds and Parking`, ignore_case = T)) ~ "Grounds and Parking",
+                                 str_detect(AreaDesc, regex(`Grounds and Parking`, ignore_case = T)) ~ "Grounds and Parking",
+                                 str_detect(RoomDescription, regex(`Swimming Pools/Lanes`, ignore_case = T)) ~ "Swimming Pools/Lanes",
+                                 str_detect(AreaDesc, regex(`Swimming Pools/Lanes`, ignore_case = T)) ~ "Swimming Pools/Lanes",
+                                 str_detect(RoomDescription, regex(`Sports/Track & Field`, ignore_case = T)) ~ "Sports/Track & Field",
+                                 str_detect(AreaDesc, regex(`Sports/Track & Field`, ignore_case = T)) ~ "Sports/Track & Field",
+                                 TRUE ~ "Other"))) # Create Room Category variable from Room and Area Description - see key word list scripts
+
+# Additional preprocessing
+model_df_v3 <- model_df_v2%>%
+   mutate(across(where(is.character) & !c(HoursWeekend), as.factor), # convert chr vars to factors
+         across(where(is.Date) & !c(EventStartDate), month), # extract the month value in dates except event start date
+         StartDay = day(EventStartDate), # Extract day number from event start date
+         StartYr = year(EventStartDate), # Extract year from event start date
+         HoursWeekend = str_replace(HoursWeekend, ":", "."),
+         HoursWeekend = as.double(HoursWeekend)) %>%
+  select(-AcctNum, -EventID, -EventDesc, -EventTitle, -EventStartDate, -EventTime, -ChargeClass, -RoomDescription, -AreaDesc) # remove unwanted variables
+
+
+# Additional variables we decided to remove
+model_df_v3.1 <- model_df_v3 %>%
+  select(-LineItemPriceEach, -InvoiceAmount, -PaymentAmount, -EventWOHours, -EventHours, -StopHour)
+
+# Summary of data
+model_df_v3.1 %>%
+  skim()
+
+```
+
+Looking at the summary statistics, there are a few issue for further considerations
+- ordering of some of the factor variables - start day of the week and start day of the month
+- looking at the min and max of some of the numerical, we see a number of extreme values (outliers). I will consider
+  correcting for this.
+- consider checking for correlation  
+- Review EventTime variable. There are 900+ unique event time categories. How important is the event time start and end     
+  variable to the model? I have left it out of this model for simplicity.
+
+We have been able to review out new features creating both event and room categories, next we will attempt to see if we can address missing data in room capacity as we believe that room capacity is a key variable in answering our key business question. We have attempted imputation using predictive mean matching and are in the process of validating the predictions. 
+
+```{r}
+# Visualize missingness of the data
+md.pattern(model_df_v3.1, rotate.names = T)
+
+```
+
+
+```{r}
+# Attempt imputation for room capacity using adhoc imputation method.
+
+capacity_fit <- with(model_df_v3, lm(RoomCapacity ~ LineItemPriceEach))
+summary(capacity_fit)
+
+# Attempt imputation for dataset with regression imputation
+model_df_imp <- mice(model_df_v3, method = "norm.predict", m = 1, maxit = 1)
+complete(model_df_imp)
+```
+This code imputes the missing values in the data set by the regression imputation method. The argument method = "norm.predict" first fits a regression model for each observed value, based on the corresponding values in other variables and then imputes the missing values with the predicted values.
+
+
+
+```{r}
+# Attempt at imputation for missing values using "pmm" and "logreg"   
+set.seed(123)
+model_df_v4  <- model_df_v3   %>%
+  mice(m = 10, seed = 123) %>%
+  complete(); summary(model_df_v4) 
+
+# writing file to csv to inspect or share
+model_df_v4 %>%
+  write_csv("../KSB_621/Data/model_df_v4.2.rds")
+
+model_df_v4.1 <- model_df_v4 %>%
+  select(-LineItemPriceEach, -InvoiceAmount, -PaymentAmount, -EventWOHours, -EventHours, -StopHour)
+
+model_df_v4.1 %>%
+  skim()
+```
+
+
+```{r}
+#Plotting the categories
+
+model_df_v4 %>%
+  ggplot(aes(RoomCapacity)) +
+  geom_histogram() +
+  theme_bw() +
+  labs(title = "Room Capacity - All Time",
+       x = "Room Capacity",
+       y = "Count")
+
+model_df_v4 %>%
+ #count(Event_Category, sort = TRUE) %>%
+  mutate(Event_Category = fct_reorder(Event_Category, RoomCapacity)) %>%
+  ggplot(aes(RoomCapacity, Event_Category)) +
+  geom_boxplot() +
+  geom_point(aes(x = RoomCapacity, color = Event_Category), size = 0.5, show.legend = F) +
+  scale_x_log10() +
+  theme_bw() + 
+  labs(title = "All Time",
+       x = "Room Capacity",
+       y = "Event Category") 
+
+```
+
+```{r}
+model_df_v4 <- read_csv("../Data/model_df_full.rds") %>%
+  mutate(across(where(is.character) & !c(HoursWeekend), as.factor), # convert chr vars to factors
+         across(where(is.Date) & !c(EventStartDate), month), # extract the month value in dates except event start date
+         StartDay = day(EventStartDate), # Extract day number from event start date
+         StartYr = year(EventStartDate), # Extract year from event start date
+         HoursWeekend = str_replace(HoursWeekend, ":", "."),
+         HoursWeekend = as.double(HoursWeekend),
+         EventStartDate <- NULL,
+         EventTime <- NULL); model_df_v4
+
+
+model_df19 <- read_csv("../Data/model_df19.rds") %>%
+  mutate(across(where(is.character) & !c(HoursWeekend), as.factor), # convert chr vars to factors
+         across(where(is.Date) & !c(EventStartDate), month), # extract the month value in dates except event start date
+         StartDay = day(EventStartDate), # Extract day number from event start date
+         #StartYr = year(EventStartDate), # Extract year from event start date
+         HoursWeekend = str_replace(HoursWeekend, ":", "."),
+         HoursWeekend = as.double(HoursWeekend),
+         EventStartDate <- NULL,
+         EventTime <- NULL); model_df19
+```
+LineItemPriceEach, EventStartMonth, EventStartDayofWeek, StartDay, EventHours, StopHour, EventWOCosts, EventWOHours, RoomCapacity, Event_Category, Room_Category
+
+
+
+```{r}
+#Plots distribution of room capacity
+
+all_sample <- model_df_v4 %>%
+  filter(!is.na(RoomCapacity)) %>%
+  select(Event_Category, Room_Category, RoomCapacity)
+
+all_distr_plot <- all_sample %>%
+  ggplot(aes(RoomCapacity)) +
+  geom_histogram() +
+  theme_bw() +
+  labs(title = "Room Capacity - All Time",
+       x = "Room Capacity",
+       y = "Count")
+
+sample_df <- model_df19_v2.1 %>%
+  filter(!is.na(RoomCapacity)) %>%
+  select(Event_Category, Room_Category, RoomCapacity)
+
+samp_distr_plot <- sample_df %>%
+  ggplot(aes(RoomCapacity)) +
+  geom_histogram() +
+  theme_bw() +
+  labs(title = "Room Capacity - 2019",
+       x = "Room Capacity",
+       y = "Count")
+
+gridExtra::grid.arrange(all_distr_plot, samp_distr_plot, ncol=2)
+```
+
+Looking at the distribution of room capacity in the 2019 data, we see that the majority of room fall under the 500 room capacity bracket.
+
+
+```{r}
+#Plotting Event Categories
+
+all_evnt_cat <- model_df_v4 %>%
+  count(Event_Category, sort = TRUE) %>%
+  mutate(Event_Category = fct_reorder(Event_Category, n)) %>%
+  ggplot(aes(n, Event_Category)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  theme_bw() + 
+  labs(title = "All Time",
+       x = "Count",
+       y = "Event Category")
+
+
+samp_evnt_cat <- model_df19_v2.1 %>%
+  count(Event_Category, sort = TRUE) %>%
+  mutate(Event_Category = fct_reorder(Event_Category, n)) %>%
+  ggplot(aes(n, Event_Category)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  theme_bw() + 
+  labs(title = "2019",
+       x = "Count",
+       y = "")
+
+gridExtra::grid.arrange(all_evnt_cat, samp_evnt_cat, ncol=2,
+                        top = textGrob("All Time vs 2019 Event Category Distributions"))
+```
+```{r}
+#Plotting Room Categories
+
+all_room_cat <- model_df_v4 %>%
+  count(Room_Category, sort = TRUE) %>%
+  mutate(Room_Category = fct_reorder(Room_Category, n)) %>%
+  ggplot(aes(n, Room_Category)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  theme_bw() + 
+  labs(title = "All Time",
+       x = "Count",
+       y = "Room_Category")
+
+
+samp_room_cat <- model_df19_v2.1 %>%
+  count(Room_Category, sort = TRUE) %>%
+  mutate(Room_Category = fct_reorder(Room_Category, n)) %>%
+  ggplot(aes(n, Room_Category)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  theme_bw() + 
+  labs(title = "2019",
+       x = "Count",
+       y = "")
+
+gridExtra::grid.arrange(all_room_cat, samp_room_cat, ncol=2,
+                        top = textGrob("All Time vs 2019 Room Category Distributions"))
+```
+
+```{r}
+#Plotting Room Capacity by Event Category
+
+all_plot_ev <- model_df_v4 %>%
+  #count(Event_Category, sort = TRUE) %>%
+  mutate(Event_Category = fct_reorder(Event_Category, RoomCapacity)) %>%
+  ggplot(aes(RoomCapacity, Event_Category)) +
+  geom_boxplot() +
+  geom_point(aes(x = RoomCapacity, color = Event_Category), size = 0.5, show.legend = F) +
+  scale_x_log10() +
+  theme_bw() + 
+  labs(title = "All Time",
+       x = "Room Capacity",
+       y = "Event Category") 
+
+ samp_plot_ev <- model_df19_v2.1 %>%
+  #count(Event_Category, sort = TRUE) %>%
+  mutate(Event_Category = fct_reorder(Event_Category, RoomCapacity)) %>%
+  ggplot(aes(RoomCapacity, Event_Category)) +
+  geom_boxplot() +
+  geom_point(aes(x = RoomCapacity, color = Event_Category), size = 0.5, show.legend = F) +
+  scale_x_log10() +
+  theme_bw() + 
+  labs(title = "2019",
+       x = "Room Capacity",
+       y = "")
+ 
+
+
+
+gridExtra::grid.arrange(all_plot_ev, samp_plot_ev, ncol= 2,
+                        top = textGrob("All Time vs 2019 Room Capacity Distributions\n by Event Category AFTER Imputation"))
+```
+
+
+```{r}
+#Plotting Room Capacity by Room Category
+
+all_plot_rv <- model_df_v4 %>%
+  #count(Event_Category, sort = TRUE) %>%
+  mutate(Room_Category = fct_reorder(Room_Category, RoomCapacity)) %>%
+  ggplot(aes(RoomCapacity, Room_Category)) +
+  geom_boxplot() +
+  geom_point(aes(x = RoomCapacity, color = Room_Category), size = 0.5, show.legend = F) +
+  scale_x_log10() +
+  theme_bw() + 
+  labs(title = "All Time",
+       x = "Room Capacity",
+       y = "Room Category")
+
+samp_plot_rv <- model_df19_v2.1 %>%
+  #count(Event_Category, sort = TRUE) %>%
+  mutate(Room_Category = fct_reorder(Room_Category, RoomCapacity)) %>%
+  ggplot(aes(RoomCapacity, Room_Category)) +
+  geom_boxplot() +
+  geom_point(aes(x = RoomCapacity, color = Room_Category), size = 0.5, show.legend = F) +
+  scale_x_log10() +
+  theme_bw() + 
+  labs(title = "2019",
+       x = "Room Capacity",
+       y = "")
+
+gridExtra::grid.arrange(all_plot_rv, samp_plot_rv, ncol=2,
+                        top = textGrob("All Time vs 2019 Room Capacity Distributions\n by Room Category AFTER Imputation"))
+```
+Looking at the relationship between Room Capacity and Event Category, we see that the 4000 room capacity outliers occur with Sporting, Socio-cultural, Academic or Professional events.
+
+
+```{r}
+#Assessing the relationship between Room Capacity and Price
+cap_price <- model_df19_v2.1 %>%
+  filter(!is.na(RoomCapacity),
+         LineItemPriceEach > 0 & LineItemPriceEach < 2500) 
+#Plot
+cap_price %>%
+  ggplot(aes(RoomCapacity, LineItemPriceEach)) +
+  geom_point() +
+  geom_smooth(method = "lm", se = FALSE) +
+  scale_y_log10()
+```
+Checking for a relationship between Line Item Price and Room Capacity. We see a slightly positive relationship between price and capacity and would like to quantify this relationship by fitting a linear regression that attempts to predict Room capacity using price.
+
+```{r}
+# Fit regression model:
+model_cap_price <- lm(RoomCapacity ~ LineItemPriceEach, data = cap_price)
+# Get regression table:
+get_regression_table(model_cap_price)
+```
+Here b0 = 258.17 (fitted intercept), b1 = 0.0213 (fitted slope for price)
+So for every increase in one unit($) in price, there is an associated increase , on average, of 0.213 units(indv) of room capacity.
+
+Question - is room capacity measured in head count or sq ft?
+
+Test statistic -
+Taking a look at the test statistic as  point estimate in relation to the hypothesis that
+   H0: B1 = 0 - There is no true relationship between price and room capacity
+vs HA: B1 != 0 - There is a true relationship (positive or negative) between price and room capacity
+
+p values -
+A p-value is the probability of obtaining a test statistic just as extreme or more extreme than the observed test statistic assuming the null hypothesis H0 is true.
+
+With the p-value of our fitted regression model as zero, we can reject the null hypothesis that there is no r/ship between price and room capacity as evidence suggests that there is a significant positive relationship.
+
+Confidence Intervals -
+We’re 95% ‘confident’ that the true population slope β1 lies between 0.164 and 0.262 in addition to the associated 0.213 increase in room capacity, with a one unit increase on price. 
+
+Conditions for using regression for inference
+ -Linearity of relationship between variables - the relationship does appear linear
+ -Independence of the residuals - because diff obs reference the same account, there is likely dependence between obs as a result of                                   the repeated measures for the same accounts
+ -Normality of the residuals - see plot below
+ 
+```{r}
+#Testing for conditions
+reg_points <- get_regression_points(model_cap_price)
+
+reg_points %>%
+  ggplot(aes(x = residual)) +
+  geom_histogram(binwidth = 100, color ="steelblue") +
+  #scale_x_log10() +
+  labs(x = "Residual")
+```
+To test  for normality, we plotted the residuals and the histogram indicates that we have more negative residuals than positive. It seems our regression model's fitted Room Capacity tends to overestimate the true Room Capacity. This is further confirmed by the slight right skew.
+
+-Equality of variance of the residuals
+```{r}
+reg_points %>%
+  ggplot(aes(x = LineItemPriceEach, y = residual)) +
+  geom_jitter(size = 0.5) +
+  #scale_x_log10() +
+  labs(x = "LineItemPriceEach", y = "Residual") +
+  geom_hline(yintercept = 0, col = "steelblue", size = 1)
+```
+To test for equality of variance, we plotted the residuals against the line price gauging for dependence. There appears to be slightly more variation in the residuals for larger values of line item price but the variation is not drastic enough to suggest heteroskedasticity
+
+```{r}
+
+observed_slope <- cap_price %>% 
+  specify(RoomCapacity ~ LineItemPriceEach) %>% 
+  calculate(stat = "slope")
+observed_slope
+
+
+null_distn_slope <- cap_price %>% 
+  specify(RoomCapacity ~ LineItemPriceEach) %>%
+  hypothesize(null = "independence") %>% 
+  generate(reps = 1000, type = "permute") %>% 
+  calculate(stat = "slope")
+
+null_distn_slope %>% 
+  get_p_value(obs_stat = observed_slope, direction = "both")
+
+visualize(null_distn_slope) +
+  shade_p_value(obs_stat = observed_slope, direction = "both")
+```
+  
+  
+```{r}
+# Splitting data into training and test sets
+set.seed(2020)
+splits <- initial_split(model_df_v5, prop = 0.6); splits
+
+training_df <- splits %>%
+  training()
+
+testing_df <- splits %>%
+  testing()
+```
+
+```{r}
+model_lr <- model_df_v5 %>%
+  filter(!is.na(RoomCapacity))
+# Fit linear regression model
+
+model_lr <- lm(RoomCapacity ~ ., data = model_lr)
+# names(model_lr)
+
+# Get regression table
+reg_table <- get_regression_table(model_lr); reg_table
+
+```
+
+
+Considerations:
+Factor variables -
+1.    For event month, the default baseline is April (alphabetically),so the intercept represents the month of April. Therefore       the estimate for the other months represent the offset in relation to the month of April. 
+        - is there an ideal baseline month?
+2.    For event day, Friday is the baseline and represents the intercept.
+3.    For event category, Academic/Professional is the baseline and represent the intercept
+4.    Baselines for day and month will change when the variables are ordered.
+5.    Consider interaction models based on the key continuous variables and how they interact with the factor variables
+
+```{r}
+# Checking for variable importance based on p-values assuming a level of significance of 0.05
+vip::vip(model_lr, geom = c("point"))
+
+```
+
+```{r}
+#Generalize the modelon test data
+pred_model_lr <- predict(model_lr, testing_df) %>%
+  as_tibble() %>%
+  round(digits = 0)
+
+rm_cap <- testing_df$RoomCapacity %>%
+  as_tibble()
+
+bind_cols(pred_model_lr, rm_cap) %>%
+  filter(value...1 == value...2)
+
+```
+
+
+
+
+
+
+
+
