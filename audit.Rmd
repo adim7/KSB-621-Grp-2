@@ -142,6 +142,7 @@ event_time_elements <- Events_all %>%
          EventStopTime, breakdown, breakdowntime, breakdown_mins); event_time_elements
 ```
 ```{r}
+# view NA summary for all vars
 event_time_elements %>%
   map(., ~ sum(is.na(.))) %>%
   as_tibble()
@@ -151,27 +152,47 @@ In the EventStartTimeSetup and EventStopTimeBreakdown columns, we have 3 types o
 - "###..." - these will also be converted to NAs
 - "23400, etc" - these we can convert to S#:hms format using the hms package, the impacted obs are [949072:4932413, ]
 ```{r}
+# index original df
+events1 <- Events_all %>%
+  mutate(obs = row_number())
+
 # view affected observations
-Events_all %>%
-  select(EventTime, EventStartTime, EventStartTimeSetup, EventStopTime, EventStopTimeBreakdown) %>% # select specific related vars
-  filter(str_detect(EventStartTimeSetup, "^\\d{1,5}$")) # obs in whole number format
-                    
-# convert affected obs to S#:hms format
-st2 <- Events_all %>%
-  select(EventTime, EventStartTime, EventStartTimeSetup, EventStopTime, EventStopTimeBreakdown) %>%
-  mutate(obs = row_number()) %>%
-  filter(str_detect(EventStartTimeSetup, "^\\d{1,5}$")) %>%
-  mutate(EventStartTimeSetup  = hms(as.numeric(EventStartTimeSetup)),
-         EventStopTimeBreakdown  = hms(as.numeric(EventStopTimeBreakdown))) %>%
-  select(EventStartTimeSetup, EventStopTimeBreakdown)
-  
-           
+
+events_subset_trans <- events1 %>%
+  #select(obs, EventTime, EventStartTime, EventStartTimeSetup, EventStopTime, EventStopTimeBreakdown) %>% # select specific related vars
+  filter(str_detect(EventStartTimeSetup, "^\\d{1,5}$")) %>% # obs in whole number format
+  mutate(EventStartTimeSetup  = hms(as.numeric(EventStartTimeSetup)), # convert from chr to time format
+         EventStopTimeBreakdown  = hms(as.numeric(EventStopTimeBreakdown))); events_subset_trans
+
+# create a list of affected obs
+events_index <- events_subset_trans %>%
+  select(obs) %>%
+  pull() # converts to a vector/list
+
+# view the rest of the observations with correct format
+events_subset <- events1 %>%
+  filter(!obs %in% events_index) %>%
+  mutate(EventStartTimeSetup = parse_date_time(EventStartTimeSetup, '%I:%M %p'),
+         EventStartTimeSetup = str_extract(EventStartTimeSetup, "\\s\\d+\\:\\d+\\:\\d+$"),
+         EventStartTimeSetup = as_hms(EventStartTimeSetup),
+         EventStopTimeBreakdown = parse_date_time(EventStopTimeBreakdown, '%I:%M %p'),
+         EventStopTimeBreakdown = str_extract(EventStopTimeBreakdown, "\\s\\d+\\:\\d+\\:\\d+$"),
+         EventStopTimeBreakdown = as_hms(EventStopTimeBreakdown))
+
+# bind both tibbles
+events2 <- bind_rows(events_subset, events_subset_trans)
+
+# check for NAs
+events2 %>%
+  map(., ~ sum(is.na(.))) %>%
+  as_tibble()
          
 # normal obs pattern "\\d+\\:\\d{2}\\s\\w{2}$" 
 ```
 
 
 ```{r}
+
 install.packages("chron")
 chron::chron(times = 23400)
 
