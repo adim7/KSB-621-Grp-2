@@ -12,19 +12,21 @@ dudes_data <- paths_chr %>%
 
 
 #Assign appropriate names to tibbles
-ChargeTypesandClassifications <- dudes_data[1] %>%
+All_join <- dudes_data[1] %>%
   map_df(~ .)
-EventWorkOrders <- dudes_data[2] %>%
+ChargeTypesandClassifications <- dudes_data[2] %>%
   map_df(~ .)
-Events_all <- dudes_data[3] %>%
+EventWorkOrders <- dudes_data[3] %>%
   map_df(~ .)
-InvoiceHeader <- dudes_data[4] %>%
+Events_all <- dudes_data[4] %>%
   map_df(~ .)
-InvoiceLineItems_all <- dudes_data[5] %>%
+InvoiceHeader <- dudes_data[5] %>%
   map_df(~ .)
-InvoicePayments <- dudes_data[6] %>%
+InvoiceLineItems_all <- dudes_data[6] %>%
   map_df(~ .)
-RoomCapacityData <- dudes_data[7] %>%
+InvoicePayments <- dudes_data[7] %>%
+  map_df(~ .)
+RoomCapacityData <- dudes_data[8] %>%
   map_df(~ .)
 
 #Cleaning and preprocessing Events data
@@ -173,5 +175,100 @@ All_join <- invoicelineitems_all %>% group_by(AcctInvID) %>% mutate(ID_2 = row_n
          PaymentAmount = ifelse(is.na(PaymentAmount), 0.00, PaymentAmount),
          EstimatedHours = ifelse(is.na(EstimatedHours), 0.00, EstimatedHours),
          EstimatedCosts = ifelse(is.na(EstimatedCosts), 0, EstimatedCosts),
-         EventHours = ifelse(is.na(EventHours), 0, EventHours)); All_join %>% head(5) %>%
-  write_csv("~/Documents/R Projects 2020/Dude Solutions/Dude Solutions Project/KSB_621/Data/All_join.csv")
+         EventHours = ifelse(is.na(EventHours), 0, EventHours),
+         EventWOHours = ifelse(is.na(EventWOHours), 0, EventWOHours)) 
+
+#All_join %>%
+  #write_csv("~/Documents/R Projects 2020/Dude Solutions/Dude Solutions Project/KSB_621/Data/All_join.csv")
+
+# Pre processing data for model building
+# Response to Business Question 2 - How much should a client charge to rent out a specific room?
+
+# Considerations
+
+# Determine key variables for building predictive model - ID variables included just for audit
+
+rent_spec_df <- All_join %>%
+  select(AcctNum, EventID, EventDesc, LineItemDesc,  LineItemPriceEach, InvoiceDate, PaymentDate, EventStartDate, 
+         EventStartMonth, EventStartDayofWeek, EventTime, EventStopDate, EventEndDayofWeek,
+         EventHours, StopHour, HoursWeekend, AreaDesc, EventWOCostsPriority, ChargeType, ChargeClass, RoomCapacity)
+
+# Take a look at the data filtering for all observations with Room Capacity Data
+# Only a little over 5% of the All_join data has RoomCapacity data
+
+rent_spec_df %>%
+  filter(!is.na(RoomCapacity))
+
+# Review filtering options to help address missing values in Room Description
+# If we filter based on the specified columns, we can then review the missing values in room description 
+# in relation to the preceding and succeeding rows, as well as accounts and/or event id and infer the room type. 
+# A number of observations appear to be for "storage room". WE may need to filter out storage room using line Item Desc
+
+# Select specific variables  for modeling, including AcctNum and EventID for ID purposes
+rent_spec_df <- All_join %>%
+  select(AcctNum, EventID, LineItemPriceEach, InvoiceAmount, PaymentAmount,
+         EventTitle, EventStartDate, EventStartMonth, EventStartDayofWeek, EventTime,
+         EventHours, StopHour, HoursWeekend, RoomDescription, EventWOCosts, EventWOHours, RoomCapacity, ChargeClass) %>%
+  filter(year(EventStartDate) == 2019) # focus on 2019 data for now
+
+
+# check proportion of missing values
+missing_values <- sort(colMeans(is.na(rent_spec_df)), decreasing = T)
+
+x <- names(missing_values)
+y <- tibble(missing_values)
+
+z <- bind_cols(x, y) %>%
+  rename(Variable = ...1, `Missing %` = missing_values) %>%
+  kable() %>%
+
+
+# preprocess model data model data
+
+model_df19 <- read_csv("Data/model_df19.csv")
+
+
+prep_model_df <- model_df19 %>%
+  select(-AcctNum, -EventID, -EventTitle, -ChargeClass, -RoomDescription) %>%
+  mutate(across(where(is.character) & !c(HoursWeekend), as.factor), # convert chr vars to factors
+         across(where(is.Date) & !c(EventStartDate), month), # extract the month value in dates except event start date
+         StartDay = day(EventStartDate), # Extract day number from event start date
+         #StartYr = year(EventStartDate), # Extract year from event start date
+         HoursWeekend = str_replace(HoursWeekend, ":", "."),
+         HoursWeekend = as.double(HoursWeekend),
+         EventStartDate <- NULL)
+
+
+# Attempted imputation for RoomCapacity
+
+library(mice)    
+set.seed(123)
+pmd_imp <- prep_model_df  %>%
+  mice(method = "cart", m = 5, seed = 123) %>%
+  complete(); summary(pmd_imp)  
+
+pmd_imp %>%
+  write_csv("/Data/pmd_imp.csv")
+
+# Update to imputed data to prepare for cluster Analysis because you can only use numeric data
+
+pmd_imp_updated <- pmd_imp %>%
+  mutate(EventCategory = recode_factor(Event_Category, 
+                                       "Religious" = 1,
+                                       "Sports/Fitness" = 2,
+                                       "Social/Meetup" = 3,
+                                       "Miscellaneous" = 4,
+                                       "Performaning/Arts" = 5,
+                                       "Academic/Professional" = 6,
+                                       "AfterSchool" = 7),
+         EventDayofWk = recode_factor(EventStartDayofWeek,
+                                      "Mon" = 1,
+                                      "Tue" = 2,
+                                      "Wed" = 3,
+                                      "Thu" = 4,
+                                      "Fri" = 5,
+                                      "Sat" = 6,
+                                      "Sun" = 7, .ordered = TRUE),
+         EventMonth = month(EventStartDate)) %>%
+  select(-Event_Category, -EventTime, -EventStartDayofWeek, -EventStartMonth, -EventStartDate) %>%
+  mutate(across(everything(), as.numeric))
