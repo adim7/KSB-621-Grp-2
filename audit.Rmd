@@ -1,0 +1,184 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(skimr)
+library(hms)
+
+
+#Getting the data files loaded into R
+dudes_data_paths <- fs::dir_info("../KSB_621/Data/raw_data/")
+
+paths_chr <- dudes_data_paths %>%
+  pull(path)
+
+dudes_data <- paths_chr %>%
+  map(read_csv) %>%
+  set_names(paths_chr)
+
+
+#Assign appropriate names to tibbles
+All_join <- dudes_data[1] %>%
+  map_df(~ .)
+ChargeTypesandClassifications <- dudes_data[2] %>%
+  map_df(~ .)
+EventWorkOrders <- dudes_data[3] %>%
+  map_df(~ .)
+Events_all <- dudes_data[4] %>%
+  map_df(~ .)
+InvoiceHeader <- dudes_data[5] %>%
+  map_df(~ .)
+InvoiceLineItems_all <- dudes_data[6] %>%
+  map_df(~ .)
+InvoicePayments <- dudes_data[7] %>%
+  map_df(~ .)
+RoomCapacityData <- dudes_data[8] %>%
+  map_df(~ .)
+```
+
+
+```{r}
+Events_all %>%
+  skim()
+```
+
+```{r}
+
+Events_all %>%
+  select(EventStartDate, EventStopDate) %>%
+  filter(is.na(EventStopDate))
+
+# Categorizing events into same day and multi-day events
+library(lubridate)
+event_date_elements <- Events_all %>%
+  select(EventStartDate, EventStopDate) %>% # event date variables
+  transmute(StartDate = mdy(EventStartDate), # convert to data class
+         StopDate = mdy(EventStopDate),
+         Duration = as.duration(StartDate %--% StopDate) / ddays(1), # lenght of event in days
+         SameDay = ifelse((Duration) == 0, "Y","N")) # same day and multi day events
+  
+# Plot same to multi day events
+event_date_elements %>%
+  ggplot(aes(SameDay)) +
+  geom_bar() +
+  scale_y_log10()
+
+
+# Plot distribution of multiday vents
+event_date_elements %>%
+  filter(SameDay == "N") %>%
+  ggplot(aes(Duration)) +
+  geom_histogram(binwidth = 10) +
+  scale_x_log10()
+
+# Summary of NAs
+
+event_date_elements %>%
+  map(., ~ sum(is.na(.))) %>%
+  as_tibble()
+
+```
+```{r}
+event_cal_elements <- Events_all %>%
+  select(EventStartDate, EventStartMonth, EventStartDayofWeek, WeekName, EventTime)
+
+event_cal_elements %>%
+  select(WeekName) %>%
+  group_by(WeekName) %>%
+  count(., sort = T)
+  
+month_levels <- c("Jan", "Feb", "Mar",
+                  "Apr", "May", "Jun",
+                  "Jul", "Aug", "Sep",
+                  "Oct", "Nov", "Dec")
+
+
+event_cal_elements %>%
+  select(EventStartDate, WeekName) %>%
+  mutate(m = str_extract(WeekName, "\\w+"),
+         d = str_extract(WeekName, "\\d*\\s\\-\\s\\d*"),
+         d1 = as.numeric(str_extract(d, "^\\d+")),
+         d2 = as.numeric(str_extract(d, "\\d+$")),
+         m = factor(m, levels = month_levels)) %>%
+  group_by(m) %>%
+  arrange(m, d) %>%
+  distinct(d)
+
+  
+
+```
+
+```{r}
+event_time_elements <- Events_all %>%
+  select(AcctNum, EventTime, EventStartTime, EventStartTimeSetup, EventStopTime, EventStopTimeBreakdown) %>%
+  mutate(obs = row_number(),
+         et1 = str_trim(str_extract(EventTime, "^\\d+\\:\\d+\\s")),
+            et2 = str_trim(str_extract(EventTime, "\\s\\d+\\:\\d+\\s")),
+            et1 = parse_date_time(et1, '%I:%M'),
+            et2 = parse_date_time(et2, '%I:%M'),
+            #starttime = parse_date_time(EventStartTime, '%I:%M:%S'),
+            setuptime = parse_date_time(EventStartTimeSetup, '%I:%M %p'),
+            setuptime = str_extract(setuptime, "\\s\\d+\\:\\d+\\:\\d+$"),
+            setuptime = as_hms(setuptime),
+            #stoptime = parse_date_time(EventStopTime, '%I:%M:%S'),
+            breakdowntime = parse_date_time(EventStopTimeBreakdown, '%I:%M %p'),
+            breakdowntime = str_extract(breakdowntime, "\\s\\d+\\:\\d+\\:\\d+$"),
+            breakdowntime = as_hms(breakdowntime),
+            setup_dur = difftime(EventStartTime, setuptime, units = c("mins")),
+            setup_mins = as.numeric(setup_dur),
+            breakdown_dur = difftime(breakdowntime, EventStopTime, units = c("mins")),
+            breakdown_mins = as.numeric(breakdown_dur),
+            setup = ifelse(setup_dur > 0, "Y", "N"),
+            setup = factor(setup),
+            breakdown = ifelse(breakdown_dur > 0, "Y", "N"),
+            breakdown = factor(breakdown)) %>%
+  select(obs, AcctNum, EventTime, et1, et2, 
+         EventStartTime, setup, setuptime, setup_mins,
+         EventStopTime, breakdown, breakdowntime, breakdown_mins); event_time_elements
+```
+```{r}
+event_time_elements %>%
+  map(., ~ sum(is.na(.))) %>%
+  as_tibble()
+```
+In the EventStartTimeSetup and EventStopTimeBreakdown columns, we have 3 types of values
+- "-" - these will be converted to NAs
+- "###..." - these will also be converted to NAs
+- "23400, etc" - these we can convert to S#:hms format using the hms package, the impacted obs are [949072:4932413, ]
+```{r}
+# view affected observations
+Events_all %>%
+  select(EventTime, EventStartTime, EventStartTimeSetup, EventStopTime, EventStopTimeBreakdown) %>% # select specific related vars
+  filter(str_detect(EventStartTimeSetup, "^\\d{1,5}$")) # obs in whole number format
+                    
+# convert affected obs to S#:hms format
+st2 <- Events_all %>%
+  select(EventTime, EventStartTime, EventStartTimeSetup, EventStopTime, EventStopTimeBreakdown) %>%
+  mutate(obs = row_number()) %>%
+  filter(str_detect(EventStartTimeSetup, "^\\d{1,5}$")) %>%
+  mutate(EventStartTimeSetup  = hms(as.numeric(EventStartTimeSetup)),
+         EventStopTimeBreakdown  = hms(as.numeric(EventStopTimeBreakdown))) %>%
+  select(EventStartTimeSetup, EventStopTimeBreakdown)
+  
+           
+         
+# normal obs pattern "\\d+\\:\\d{2}\\s\\w{2}$" 
+```
+
+
+```{r}
+install.packages("chron")
+chron::chron(times = 23400)
+
+hms("23400")
+hms(9900)
+
+ifelse(str_detect(EventStartTimeSetup, "\\d+"), hms(EventStartTimeSetup), EventStartTimeSetup)
+```
+
+
