@@ -1,0 +1,76 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+
+
+```{r}
+Events_all_v2 <- Events_all %>%
+  mutate(obs = row_number(),
+         EventStartDate = mdy(EventStartDate), # convert to data class
+         EventStopDate = mdy(EventStopDate),
+         Duration = as.duration(EventStartDate %--% EventStopDate) / ddays(1), # lenght of event in days
+         Same_Day = ifelse((Duration) == 0, "Y","N"),
+         Same_Day = factor(Same_Day),# same day and multi day events
+         EventStartMonth = factor(EventStartMonth, levels = c("Jan", "Feb", "Mar", "Apr", 
+                                                              "May", "Jun", "Jul", "Aug", 
+                                                              "Sep", "Oct", "Nov", "Dec")), #convert to factor variable and set order of months
+         EventStartDayofWeek = factor(EventStartDayofWeek, 
+                                      levels = c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")),
+         EventEndDayofWeek =  factor(EventEndDayofWeek, 
+                                     levels = c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")))
+
+# Filter data for obs that have EventStartTimeSetup and EventStopTimeBreakdown in a numeric format instead of time format
+Events_all_v3 <- Events_all_v2 %>%
+  filter(str_detect(EventStartTimeSetup, "^\\d{1,5}$")) %>% # obs in whole number format
+  mutate(EventStartTimeSetup  = as_hms(as.numeric(EventStartTimeSetup)), # convert from chr to time format
+         EventStopTimeBreakdown  = as_hms(as.numeric(EventStopTimeBreakdown)))
+  
+# create a list of those affected obs
+events_index <- events_subset_trans %>%
+  select(obs) %>%
+  pull() # converts to a vector/list  
+  
+# transform EventStartTimeSetup and EventStopTimeBreakdown in the observations with time format
+Events_all_v4 <- Events_all_v2 %>%
+  filter(!obs %in% events_index) %>%
+  mutate(EventStartTimeSetup = parse_date_time(EventStartTimeSetup, '%I:%M %p'),
+         EventStartTimeSetup = str_extract(EventStartTimeSetup, "\\s\\d+\\:\\d+\\:\\d+$"),
+         EventStartTimeSetup = as_hms(EventStartTimeSetup),
+         EventStopTimeBreakdown = parse_date_time(EventStopTimeBreakdown, '%I:%M %p'),
+         EventStopTimeBreakdown = str_extract(EventStopTimeBreakdown, "\\s\\d+\\:\\d+\\:\\d+$"),
+         EventStopTimeBreakdown = as_hms(EventStopTimeBreakdown))  
+  
+# bind both tibbles
+Events_all_v5 <- bind_rows(Events_all_v4, Events_all_v3)  
+  
+# create some new features from EventStartTimeSetup and EventStopTimeBreakdown
+
+Events_all_v6 <- Events_all_v5 %>%
+  mutate(Event_Setup_dur = difftime(EventStartTime, EventStartTimeSetup, units = c("mins")),
+         Event_Setup_mins = as.numeric(Event_Setup_dur),
+         Event_Breakdown_dur = difftime(EventStopTimeBreakdown, EventStopTime, units = c("mins")),
+         Event_Breakdown_mins = as.numeric(Event_Breakdown_dur),
+         Setup = ifelse(Event_Setup_dur > 0, "Y", "N"),
+         Setup = factor(Setup),
+         Breakdown = ifelse(Event_Breakdown_dur > 0, "Y", "N"),
+         Breakdown = factor(Breakdown))
+
+# audit variables in original data with too much variation, see - EventHours, Saturday, Sunday & Weekday After Hours
+
+Events_all_v7 <- Events_all_v6 %>%
+  mutate(Event_Hours = difftime(EventStopTime, EventStartTime, units = c("hours")),
+         Event_Hours = as.numeric(Event_Hours),
+         Sat_Hours = ifelse(EventStartDayofWeek %in% c("Sat"), Event_Hours, 0),
+         Sun_Hours = ifelse(EventStartDayofWeek %in% c("Sun"), Event_Hours, 0),
+         reg_hrs_end = as_hms("17:00:00"),
+         after_hrs_dur = difftime(EventStopTime, reg_hrs_end, units = c("hours")),
+         after_hrs_dur = as.numeric(after_hrs_dur),
+         Wk_After_Hours = ifelse(EventStartDayofWeek %in% c("Mon", "Tue", "Wed", "Thu", "Fri")
+                              & after_hrs_dur > 0, after_hrs_dur, 0))
+         
+```
+
+
+
