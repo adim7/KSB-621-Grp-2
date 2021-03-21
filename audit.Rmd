@@ -157,19 +157,19 @@ events1 <- Events_all %>%
   mutate(obs = row_number())
 
 # view affected observations
-
 events_subset_trans <- events1 %>%
   #select(obs, EventTime, EventStartTime, EventStartTimeSetup, EventStopTime, EventStopTimeBreakdown) %>% # select specific related vars
   filter(str_detect(EventStartTimeSetup, "^\\d{1,5}$")) %>% # obs in whole number format
-  mutate(EventStartTimeSetup  = hms(as.numeric(EventStartTimeSetup)), # convert from chr to time format
-         EventStopTimeBreakdown  = hms(as.numeric(EventStopTimeBreakdown))); events_subset_trans
+  mutate(EventStartTimeSetup  = as_hms(as.numeric(EventStartTimeSetup)), # convert from chr to time format
+         EventStopTimeBreakdown  = as_hms(as.numeric(EventStopTimeBreakdown))); events_subset_trans
+
 
 # create a list of affected obs
 events_index <- events_subset_trans %>%
   select(obs) %>%
   pull() # converts to a vector/list
 
-# view the rest of the observations with correct format
+# view the observations with correct format
 events_subset <- events1 %>%
   filter(!obs %in% events_index) %>%
   mutate(EventStartTimeSetup = parse_date_time(EventStartTimeSetup, '%I:%M %p'),
@@ -179,8 +179,27 @@ events_subset <- events1 %>%
          EventStopTimeBreakdown = str_extract(EventStopTimeBreakdown, "\\s\\d+\\:\\d+\\:\\d+$"),
          EventStopTimeBreakdown = as_hms(EventStopTimeBreakdown))
 
+
+#summary(events_subset_trans)
+
+
 # bind both tibbles
 events2 <- bind_rows(events_subset, events_subset_trans)
+
+# Creating more features
+
+events2 %>%
+  mutate(setup_dur = difftime(EventStartTime, EventStartTimeSetup, units = c("mins")),
+            setup_mins = as.numeric(setup_dur),
+            breakdown_dur = difftime(EventStopTimeBreakdown, EventStopTime, units = c("mins")),
+            breakdown_mins = as.numeric(breakdown_dur),
+            setup = ifelse(setup_dur > 0, "Y", "N"),
+            setup = factor(setup),
+            breakdown = ifelse(breakdown_dur > 0, "Y", "N"),
+            breakdown = factor(breakdown)) %>%
+  select(obs, AcctNum, EventTime,
+         EventStartTime, setup, EventStartTimeSetup, setup_mins,
+         EventStopTime, breakdown, EventStopTimeBreakdown, breakdown_mins)
 
 # check for NAs
 events2 %>%
@@ -193,13 +212,92 @@ events2 %>%
 
 ```{r}
 
-install.packages("chron")
-chron::chron(times = 23400)
-
-hms("23400")
-hms(9900)
-
-ifelse(str_detect(EventStartTimeSetup, "\\d+"), hms(EventStartTimeSetup), EventStartTimeSetup)
+events_hours_elements <- Events_all %>%
+  select(EventHours:HoursAfterHours)
+  
+```
+```{r}
+events_hours_elements %>%
+  map(., ~ sum(is.na(.))) %>%
+  as_tibble()
 ```
 
+```{r}
+InvoiceLineItems_all
+
+lineitems <- InvoiceLineItems_all %>%
+  select(LineItemDesc, LineItemQty, LineItemPriceEach, LineItemTotalCost) %>%
+  mutate(LineItemDesc = factor(LineItemDesc))
+
+# Break down and Questions
+lineitems %>%
+  select(LineItemDesc, LineItemQty, LineItemPriceEach, LineItemTotalCost) %>%
+  arrange(LineItemPriceEach)
+
+# Sorting for larger extreme outliers, we observe that there are prices ranging from $1000 to 75000 that reflect line item qty of 1.
+# Sorting for smaller extreme outliers, we observe that there are prices ranging from -$1000 to -40000 that reflect line item qty of 1.
+
+# Summary of full line item data
+summary(lineitems) # we see significant variation between mean or median values and the max/min values
+
+trim_line_items <- lineitems %>%
+  select(LineItemDesc, LineItemQty, LineItemPriceEach, LineItemTotalCost) %>%
+  filter(between(LineItemPriceEach, quantile(LineItemPriceEach, 0.0225, na.rm = TRUE), #removing extreme values using LineItemPriceEach
+                 quantile(LineItemPriceEach, 0.999, na.rm = TRUE)))
+  
+summary(trim_line_items) 
+
+trim_line_items %>%
+  select(LineItemDesc, LineItemQty, LineItemPriceEach, LineItemTotalCost) %>%
+  arrange(desc(LineItemPriceEach))
+# plot distribution of line item price each
+  ggplot() +
+  geom_histogram(aes(x = LineItemPriceEach), binwidth = 0.5) %>%
+  scale_x_log10()
+```
+
+```{r}
+EventWorkOrders %>%
+  map(., ~ sum(is.na(.))) %>%
+  as_tibble()
+
+ewo <- EventWorkOrders %>%
+  mutate(EventWOHours = as.numeric(EventWOHours),
+         DateCreated = mdy(DateCreated),
+         DateCompleted = mdy(DateCompleted),
+         WOStatus = factor(WOStatus),
+         WOCraft = factor(WOCraft),
+         Priority = factor(Priority),
+         DateRequested = mdy(DateRequested),
+         DateEstStart = mdy(DateEstStart),
+         DateEstComp = mdy(DateEstComp),
+         EstimatedHours = as.numeric(EstimatedHours),
+         EstimatedCosts = as.numeric(EstimatedCosts))
+
+ewo %>%
+  map(., ~ sum(is.na(.))) %>%
+  as_tibble()
+
+summary(ewo)
+
+ewo %>%
+  group_by(WOCraft) %>%
+  count(WOCraft, sort = T)
+
+ewo %>%
+  select(EstimatedHours, EventWOHours)
+
+
+lineitems <- read_csv("Downloads/InvoiceLineItems1.csv")
+
+li <- lineitems %>%
+  select(LineItemDesc, LineItemQty, LineItemPriceEach, LineItemTotalCost) %>%
+  mutate(LineItemDesc = factor(LineItemDesc))
+  
+summary(li)
+
+li %>%
+  arrange(desc(LineItemPriceEach)) %>%
+  tail(1000)
+```
 
