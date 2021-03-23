@@ -54,7 +54,7 @@ Events_all_v3 <- Events_all_v2 %>%
          EventStopTimeBreakdown  = as_hms(as.numeric(EventStopTimeBreakdown)))
 
 # create a list of those affected obs
-events_index <- events_subset_trans %>%
+events_index <- Events_all_v3 %>%
   select(obs) %>%
   pull() # converts to a vector/list  
 
@@ -97,7 +97,9 @@ Events_all_v7 <- Events_all_v6 %>%
                                  & after_hrs_dur > 0, after_hrs_dur, 0))
 # Drop variables with over 60% missing values
 events_all <- Events_all_v7 %>%
-  select(-AlternateFSScheduleID)
+  select(-AlternateFSScheduleID, -EventHours, -SaturdayHours, -SundayHours, -WeekdayAfterHours, -TotalAfterHours, 
+         -HoursUsed, -HoursWeekend, -HoursWeekdayAfterHours, -HoursAfterHours, -obs, -Event_Setup_dur, -Event_Breakdown_dur,
+         -reg_hrs_end, -after_hrs_dur)
 
 ################################################################################################
 
@@ -118,7 +120,10 @@ clean_workorders_df <- EventWorkOrders %>%
          DateEstStart = ymd(DateEstStart),
          DateEstComp = ymd(DateEstComp),
          EstimatedHours = as.numeric(EstimatedHours),
-         EstimatedCosts = as.numeric(EstimatedCosts))
+         EstimatedCosts = as.numeric(EstimatedCosts),
+         WOHours = ifelse(is.na(EventWOHours),
+                          ifelse(!is.na(EstimatedHours),
+                                 EstimatedHours, EventWOHours), EventWOHours))
 
 # Drop variables with over 60% missing values
 eventworkorders <- clean_workorders_df %>%
@@ -215,18 +220,22 @@ All_join <- invoicelineitems_all %>% group_by(AcctInvID) %>% mutate(ID_2 = row_n
             by = c("RoomID")) %>%
   ungroup() %>%
   separate(AcctEventID, into = c("AcctNum", "EventID")) %>%
-  select(-ID_2, -AcctNum.x, -ID_3, -AcctNum.y, -ID_4, -ID_5, -ID_6, -date) %>%
+  select(-ID_2, -AcctNum.x, -ID_3, -AcctNum.y, -ID_4, -ID_5, -ID_6) %>%
   mutate(InvoiceAmount = ifelse(is.na(InvoiceAmount), 0.00, InvoiceAmount),
          InvoiceLineItems = ifelse(is.na(InvoiceLineItems), 0, InvoiceLineItems),
          InvoiceStatus = ifelse(is.na(InvoiceStatus), "", InvoiceStatus),
          PaymentAmount = ifelse(is.na(PaymentAmount), 0.00, PaymentAmount),
          EstimatedHours = ifelse(is.na(EstimatedHours), 0.00, EstimatedHours),
          EstimatedCosts = ifelse(is.na(EstimatedCosts), 0, EstimatedCosts),
-         EventHours = ifelse(is.na(EventHours), 0, EventHours),
-         EventWOHours = ifelse(is.na(EventWOHours), 0, EventWOHours)) 
+         Event_Hours = ifelse(is.na(Event_Hours), 0, Event_Hours),
+         EventWOHours = ifelse(is.na(EventWOHours), 0, EventWOHours),
+         WOHours = ifelse(is.na(WOHours), 0, WOHours),
+         Event_Duration_Days = ifelse(is.na(Event_Duration_Days), 0, Event_Duration_Days)) 
+
+
 
 #All_join %>%
-  #write_csv("~/Documents/R Projects 2020/Dude Solutions/Dude Solutions Project/KSB_621/Data/All_join.csv")
+  #write_csv("~/Documents/R Projects 2020/Dude Solutions/Dude Solutions Project/KSB_621/Data/raw_data/All_join_v2.rds")
 
 # Pre processing data for model building
 # Response to Business Question 2 - How much should a client charge to rent out a specific room?
